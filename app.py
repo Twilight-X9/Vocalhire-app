@@ -19,7 +19,6 @@ def get_secret(key_name, default_val=""):
         return st.secrets[key_name]
     return os.getenv(key_name, default_val)
 
-# Changed from OPENAI_API_KEY to GROQ_API_KEY
 GROQ_API_KEY = get_secret("GROQ_API_KEY")
 MURF_API_KEY = get_secret("MURF_API_KEY")
 MURF_VOICE_ID = get_secret("MURF_VOICE_ID", "en-US-marcus") 
@@ -66,68 +65,70 @@ def generate_murf_audio(text):
         st.error(f"Error connecting to Murf AI: {str(e)}")
         return None
 
-def get_openai_response(messages):
-    """Gets a response using Groq's high-speed Llama 3 model."""
-    try:
-        # Changed the setup to point to Groq's servers
-        client = OpenAI(
-            api_key=GROQ_API_KEY,
-            base_url="https://api.groq.com/openai/v1"
-        )
-        response = client.chat.completions.create(
-            model="llama3-8b-8192", 
-            messages=messages, # Uses the passed messages list
-            max_tokens=150,  
-            temperature=0.7  
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        st.error(f"Groq API Error: {str(e)}")
-        return None
+def get_groq_stream(messages):
+    """Streams a response using Groq's high-speed Llama 3 model."""
+    client = OpenAI(
+        api_key=GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1"
+    )
+    
+    # Requesting a stream from Groq
+    response = client.chat.completions.create(
+        model="llama3-8b-8192", 
+        messages=messages, 
+        max_tokens=150,  
+        temperature=0.7,
+        stream=True # <--- Enabled streaming
+    )
+    
+    # Yielding chunks as they arrive
+    for chunk in response:
+        if chunk.choices[0].delta.content is not None:
+            yield chunk.choices[0].delta.content
 
 
 st.title("🎙️ VocalHire: AI Mock Interviewer")
 st.subheader("Powered by Groq & Murf Falcon TTS")
 st.divider()
 
+# Display chat history
 for message in st.session_state.messages:
     if message["role"] == "system":
         continue
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
+# Initial Greeting
 if len(st.session_state.messages) == 1: 
     if st.button("🚀 Start Interview", type="primary"):
-        with st.spinner("Interviewer is joining the room..."):
-            ai_response = get_openai_response(st.session_state.messages)
+        with st.chat_message("assistant"):
+            stream = get_groq_stream(st.session_state.messages)
+            full_response = st.write_stream(stream)
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
             
-            if ai_response:
-                st.session_state.messages.append({"role": "assistant", "content": ai_response})
+            with st.spinner("🎧 Generating audio..."):
+                audio_bytes = generate_murf_audio(full_response)
                 
-                with st.chat_message("assistant"):
-                    st.write(ai_response)
-                
-                audio_bytes = generate_murf_audio(ai_response)
-                if audio_bytes:
-                    st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+            if audio_bytes:
+                st.audio(audio_bytes, format="audio/mp3", autoplay=True)
                 
 user_input = st.chat_input("Type your answer here...")
 
+# User Interaction
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.write(user_input)
     
-    with st.spinner("🤔 Thinking..."):
-        ai_response = get_openai_response(st.session_state.messages)
-    
-    if ai_response:
-        st.session_state.messages.append({"role": "assistant", "content": ai_response})
-        with st.chat_message("assistant"):
-            st.write(ai_response)
+    with st.chat_message("assistant"):
+        # Stream the text live
+        stream = get_groq_stream(st.session_state.messages)
+        full_response = st.write_stream(stream)
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
         
+        # Generate audio after text is fully generated
         with st.spinner("🎧 Generating audio..."):
-            audio_bytes = generate_murf_audio(ai_response)
+            audio_bytes = generate_murf_audio(full_response)
         
         if audio_bytes:
             st.audio(audio_bytes, format="audio/mp3", autoplay=True)
