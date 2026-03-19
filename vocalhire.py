@@ -331,7 +331,7 @@ with st.sidebar:
     st.markdown(f"<p style='font-size:0.9rem'>Murf API: {murf_status}</p>", unsafe_allow_html=True)
 
     st.write("")
-    if st.button("End Interview & Reset", kind="secondary", use_container_width=True):
+    if st.button("End Interview & Reset", type="secondary", use_container_width=True):
         st.session_state.messages =[{"role": "system", "content": SYSTEM_PROMPT}]
         st.session_state.interview_active = False
         st.session_state.latest_audio = None
