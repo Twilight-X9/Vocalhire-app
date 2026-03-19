@@ -186,7 +186,7 @@ load_dotenv()
 
 def get_secret(key_name, default_val = ""):
     if key_name in st.secrets:
-    return st.secrets[key_name]
+        return st.secrets[key_name]
 return os.getenv(key_name, default_val)
 
 # Use session state for keys so they remain editable in the sidebar securely
