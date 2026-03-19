@@ -2,7 +2,7 @@ import streamlit as st
 from openai import OpenAI
 import requests
 import os
-    from dotenv import load_dotenv
+from dotenv import load_dotenv
 
 # ============================================================================
 # 1. CONFIGURE STREAMLIT PAGE & CSS
