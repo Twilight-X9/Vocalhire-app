@@ -95,7 +95,7 @@ def get_groq_response(messages):
         )
         
         response = client.chat.completions.create(
-            model="llama3-8b-8192", # Free and blazingly fast Groq model
+            model="openai/gpt-oss-120b", # Free and blazingly fast Groq model
             messages=messages,
             max_tokens=150,  
             temperature=0.7  
