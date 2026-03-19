@@ -2,7 +2,7 @@ import streamlit as st
 from openai import OpenAI
 import requests
 import os
-from dotenv import load_dotenv
+    from dotenv import load_dotenv
 
 # ============================================================================
 # 1. CONFIGURE STREAMLIT PAGE & CSS
@@ -185,17 +185,17 @@ html, body, [class*= "css"], .stApp {
 load_dotenv()
 
 def get_secret(key_name, default_val = ""):
-    if key_name in st.secrets:
-        return st.secrets[key_name]
+if key_name in st.secrets:
+    return st.secrets[key_name]
 return os.getenv(key_name, default_val)
 
 # Use session state for keys so they remain editable in the sidebar securely
 if "GROQ_API_KEY" not in st.session_state:
-    st.session_state.GROQ_API_KEY = get_secret("GROQ_API_KEY")
+st.session_state.GROQ_API_KEY = get_secret("GROQ_API_KEY")
 if "MURF_API_KEY" not in st.session_state:
-    st.session_state.MURF_API_KEY = get_secret("MURF_API_KEY")
+st.session_state.MURF_API_KEY = get_secret("MURF_API_KEY")
 if "MURF_VOICE_ID" not in st.session_state:
-    st.session_state.MURF_VOICE_ID = get_secret("MURF_VOICE_ID", "en-US-marcus")
+st.session_state.MURF_VOICE_ID = get_secret("MURF_VOICE_ID", "en-US-marcus")
 
 # ============================================================================
 # 3. STATE MANAGEMENT & PROMPT
@@ -205,23 +205,23 @@ Conduct a mock interview with the user.Ask one question at a time.
 Keep your questions under 2 sentences.Wait for their response."""
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [{ "role": "system", "content": SYSTEM_PROMPT }]
+st.session_state.messages = [{ "role": "system", "content": SYSTEM_PROMPT }]
 
 if "interview_active" not in st.session_state:
-    st.session_state.interview_active = False
+st.session_state.interview_active = False
 
 if "latest_audio" not in st.session_state:
-    st.session_state.latest_audio = None
+st.session_state.latest_audio = None
 
 if "ai_status" not in st.session_state:
-    st.session_state.ai_status = "HR Manager involves..."
+st.session_state.ai_status = "HR Manager involves..."
 
 # ============================================================================
 # 4. BACKEND FUNCTIONS
 # ============================================================================
 def generate_murf_audio(text):
-    if not st.session_state.MURF_API_KEY:
-        st.warning("Please configure Murf API Key in Settings.")
+if not st.session_state.MURF_API_KEY:
+st.warning("Please configure Murf API Key in Settings.")
 return None
 MURF_API_URL = "https://api.murf.ai/v1/speech/generate"
 headers = {
@@ -270,8 +270,8 @@ st.error(f"Groq Transcription Error: {str(e)}")
 return None
 
 def get_groq_response(messages):
-    if not st.session_state.GROQ_API_KEY:
-    return None
+if not st.session_state.GROQ_API_KEY:
+return None
 try:
 client = OpenAI(api_key = st.session_state.GROQ_API_KEY, base_url = "https://api.groq.com/openai/v1")
 response = client.chat.completions.create(
@@ -289,7 +289,7 @@ return None
 # 5. SIDEBAR(Clean Settings Menu)
 # ============================================================================
 with st.sidebar:
-    st.markdown("<h1>⚙️ Settings</h1>", unsafe_allow_html = True)
+st.markdown("<h1>⚙️ Settings</h1>", unsafe_allow_html = True)
 st.markdown("<p style='color: #64748B; margin-bottom: 2rem;'>Configure your interview environment</p>", unsafe_allow_html = True)
 
 st.session_state.GROQ_API_KEY = st.text_input("Groq API Key", type = "password", value = st.session_state.GROQ_API_KEY, placeholder = "gsk_...")
