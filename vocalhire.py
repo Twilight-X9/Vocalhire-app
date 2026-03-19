@@ -5,238 +5,151 @@ import os
 from dotenv import load_dotenv
 
 # ============================================================================
-# 1. CONFIGURE STREAMLIT PAGE & CSS
+# 1. CONFIGURE STREAMLIT PAGE
 # ============================================================================
-st.set_page_config(
-    page_title="VocalHire | AI Mock Interviewer",
-    page_icon="🎙️",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="VocalHire AI", page_icon="🎙️")
 
-# Inject Custom CSS for a sleek, modern look
 st.markdown("""
 <style>
-    /* Gradient text for the main title */
-    .title-text {
-        background: -webkit-linear-gradient(45deg, #FF4B2B, #FF416C);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 3em;
-        font-weight: 800;
-        text-align: center;
-        margin-bottom: 0px;
-    }
-    .subtitle-text {
-        text-align: center;
-        color: #888888;
-        font-size: 1.2em;
-        margin-bottom: 2rem;
-    }
-    /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* Style the audio player to be more subtle */
-    audio {
-        height: 40px;
-        width: 100%;
-        border-radius: 10px;
-    }
+    .title-text { background: -webkit-linear-gradient(45deg, #FF4B2B, #FF416C); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3em; font-weight: 800; text-align: center; }
+    .subtitle-text { text-align: center; color: #888888; font-size: 1.2em; margin-bottom: 2rem; }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# 2. SMART API KEY LOADER
+# 2. API KEYS & CLIENTS
 # ============================================================================
 load_dotenv()
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
+MURF_API_KEY = st.secrets.get("MURF_API_KEY", os.getenv("MURF_API_KEY"))
+MURF_VOICE_ID = st.secrets.get("MURF_VOICE_ID", "en-US-marcus")
 
-def get_secret(key_name, default_val=""):
-    if key_name in st.secrets:
-        return st.secrets[key_name]
-    return os.getenv(key_name, default_val)
-
-GROQ_API_KEY = get_secret("GROQ_API_KEY") 
-MURF_API_KEY = get_secret("MURF_API_KEY")
-MURF_VOICE_ID = get_secret("MURF_VOICE_ID", "en-US-marcus")
+groq_client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
 
 # ============================================================================
-# 3. STATE MANAGEMENT & PROMPT
+# 3. STATE MANAGEMENT
 # ============================================================================
-SYSTEM_PROMPT = """You are a strict but fair HR manager at a top tech company. 
-Conduct a mock interview with the user. Ask one question at a time. 
-Keep your questions under 2 sentences. Wait for their response."""
+SYSTEM_PROMPT = "You are a professional HR interviewer. Ask one brief interview question at a time. Keep responses under 25 words."
 
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-if "interview_active" not in st.session_state:
-    st.session_state.interview_active = False
-
-if "latest_audio" not in st.session_state:
-    st.session_state.latest_audio = None
+if "active" not in st.session_state:
+    st.session_state.active = False
+if "audio_to_play" not in st.session_state:
+    st.session_state.audio_to_play = None
+if "input_key" not in st.session_state:
+    st.session_state.input_key = 0 # Used to reset the audio widget
 
 # ============================================================================
-# 4. BACKEND FUNCTIONS
+# 4. CORE FUNCTIONS
 # ============================================================================
-def generate_murf_audio(text):
-    MURF_API_URL = "https://api.murf.ai/v1/speech/generate"
-    headers = {
-        "api-key": MURF_API_KEY,
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
+
+def generate_murf_tts(text):
+    """Converts text to speech using Murf API"""
+    url = "https://api.murf.ai/v1/speech/generate"
+    headers = {"api-key": MURF_API_KEY, "Content-Type": "application/json"}
     payload = {
-        "voiceId": MURF_VOICE_ID,       
-        "text": text,                    
-        "modelVersion": "GEN2"            
+        "voiceId": MURF_VOICE_ID,
+        "text": text,
+        "modelVersion": "GEN2"
     }
     try:
-        response = requests.post(MURF_API_URL, headers=headers, json=payload, timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            if "audioFile" in data:
-                audio_url = data["audioFile"]
-                audio_response = requests.get(audio_url)
-                if audio_response.status_code == 200:
-                    return audio_response.content
-            return response.content
-        else:
-            st.toast(f"Murf API Error: {response.status_code}", icon="❌")
-            return None
+        resp = requests.post(url, json=payload, headers=headers)
+        if resp.status_code == 200:
+            audio_url = resp.json().get("audioFile")
+            # Download the actual audio file bytes
+            audio_data = requests.get(audio_url).content
+            return audio_data
     except Exception as e:
-        st.toast(f"Connection Error: {str(e)}", icon="⚠️")
-        return None
+        st.error(f"TTS Error: {e}")
+    return None
 
-def transcribe_voice(audio_file):
+def transcribe_audio(audio_file):
+    """Transcribes user speech using Groq Whisper"""
     try:
-        client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
-        audio_file.name = "recording.wav"
-        transcription = client.audio.transcriptions.create(
+        # Groq expects a file-like object with a name
+        audio_file.name = "input.wav"
+        transcription = groq_client.audio.transcriptions.create(
             model="whisper-large-v3",
-            file=audio_file,
-            response_format="text"
+            file=audio_file
         )
-        return transcription
+        return transcription.text
     except Exception as e:
-        st.error(f"Groq Transcription Error: {str(e)}")
+        st.error(f"STT Error: {e}")
         return None
 
-def get_groq_response(messages):
+def get_ai_logic_response():
+    """Gets the next question/response from Llama 3"""
     try:
-        client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
-        response = client.chat.completions.create(
+        response = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=messages,
-            max_tokens=150,  
-            temperature=0.7  
+            messages=st.session_state.messages
         )
         return response.choices[0].message.content
     except Exception as e:
-        st.error(f"Groq API Error: {str(e)}")
-        return None
+        st.error(f"LLM Error: {e}")
+        return "Sorry, I encountered an error. Could you repeat that?"
 
 # ============================================================================
-# 5. SIDEBAR (Clean Settings Menu)
-# ============================================================================
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=50) # Placeholder logo
-    st.title("Settings")
-    
-    with st.expander("🔑 API Status", expanded=True):
-        st.write("✅ Groq" if GROQ_API_KEY else "❌ Groq Key Missing")
-        st.write("✅ Murf" if MURF_API_KEY else "❌ Murf Key Missing")
-    
-    st.divider()
-    st.info("VocalHire uses Groq Whisper (STT), LLaMA 3.1 (Logic), and Murf AI (TTS).")
-    
-    if st.button("🔄 End & Reset Interview", use_container_width=True):
-        st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        st.session_state.interview_active = False
-        st.session_state.latest_audio = None
-        st.rerun()
-
-# ============================================================================
-# 6. MAIN UI FLOW
+# 5. UI LAYOUT
 # ============================================================================
 st.markdown('<p class="title-text">VocalHire</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle-text">Your AI Hiring Manager</p>', unsafe_allow_html=True)
 
-# --- LANDING PAGE STATE ---
-if not st.session_state.interview_active:
-    st.write("")
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("""
-        ### Welcome to the Interview Room
-        Ensure your microphone is connected. The interviewer will ask you one question at a time.
-        """)
-        st.write("")
-        if st.button("🚀 Enter the Interview Room", type="primary", use_container_width=True):
-            st.session_state.interview_active = True
-            
-            with st.spinner("Interviewer is reviewing your resume..."):
-                ai_response = get_groq_response(st.session_state.messages)
-                if ai_response:
-                    st.session_state.messages.append({"role": "assistant", "content": ai_response})
-                    audio_bytes = generate_murf_audio(ai_response)
-                    if audio_bytes:
-                        st.session_state.latest_audio = audio_bytes
-            st.rerun()
+# Sidebar for controls
+with st.sidebar:
+    if st.button("Reset Interview"):
+        st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        st.session_state.active = False
+        st.session_state.audio_to_play = None
+        st.rerun()
 
-# --- ACTIVE INTERVIEW STATE ---
+# Landing Page
+if not st.session_state.active:
+    if st.button("Start Interview", type="primary", use_container_width=True):
+        st.session_state.active = True
+        # Get first question immediately
+        first_resp = get_ai_logic_response()
+        st.session_state.messages.append({"role": "assistant", "content": first_resp})
+        st.session_state.audio_to_play = generate_murf_tts(first_resp)
+        st.rerun()
 else:
-    # 1. Render Chat History
-    chat_container = st.container()
-    with chat_container:
-        for message in st.session_state.messages:
-            if message["role"] == "system":
-                continue
-            
-            # Use custom avatars
-            avatar = "💼" if message["role"] == "assistant" else "👤"
-            with st.chat_message(message["role"], avatar=avatar):
-                st.write(message["content"])
+    # Display Chat
+    for msg in st.session_state.messages:
+        if msg["role"] != "system":
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
 
-    # 2. Render Latest Audio Output (Autoplays the most recent AI response)
-    if st.session_state.latest_audio:
-        st.audio(st.session_state.latest_audio, format="audio/mp3", autoplay=True)
-        # Clear it so it doesn't replay if the user just clicks around the page
-        st.session_state.latest_audio = None 
+    # Play latest AI Voice response
+    if st.session_state.audio_to_play:
+        st.audio(st.session_state.audio_to_play, format="audio/mp3", autoplay=True)
+        st.session_state.audio_to_play = None # Clear after playing once
 
     st.divider()
 
-    # 3. User Input Controls (Side by Side for cleaner look)
-    st.write("**Your Turn:** *Speak or type your response.*")
-    
-    final_user_input = None
-
-    # Handle Text Input via st.chat_input (Anchors to bottom)
-    user_text = st.chat_input("Type your answer here...")
-    
-    # Handle Audio Input natively inline
-    user_audio = st.audio_input("Or record your voice")
+    # User Input Area
+    st.write("### 🎙️ Your Turn")
+    # We use a key that changes every time to "clear" the widget
+    user_audio = st.audio_input("Record your answer", key=f"audio_in_{st.session_state.input_key}")
 
     if user_audio:
-        with st.spinner("Transcribing..."):
-            final_user_input = transcribe_voice(user_audio)
-    elif user_text:
-        final_user_input = user_text
-
-    # 4. Process User Input
-    if final_user_input:
-        # Append user message
-        st.session_state.messages.append({"role": "user", "content": final_user_input})
-        
-        with st.spinner("Interviewer is thinking..."):
-            ai_response = get_groq_response(st.session_state.messages)
-        
-        if ai_response:
-            st.session_state.messages.append({"role": "assistant", "content": ai_response})
-            with st.spinner("Generating voice..."):
-                audio_bytes = generate_murf_audio(ai_response)
-                if audio_bytes:
-                    st.session_state.latest_audio = audio_bytes
-        
-        st.rerun()
+        with st.status("Thinking...", expanded=False) as status:
+            # 1. Transcribe
+            st.write("Listening to you...")
+            user_text = transcribe_audio(user_audio)
+            
+            if user_text:
+                st.session_state.messages.append({"role": "user", "content": user_text})
+                
+                # 2. Get AI Logic
+                st.write("Formulating question...")
+                ai_text = get_groq_response(st.session_state.messages)
+                st.session_state.messages.append({"role": "assistant", "content": ai_text})
+                
+                # 3. Generate Speech
+                st.write("Synthesizing voice...")
+                st.session_state.audio_to_play = generate_murf_tts(ai_text)
+                
+                # 4. Increment key to reset audio widget for next turn
+                st.session_state.input_key += 1
+                status.update(label="Response Ready!", state="complete")
+                st.rerun()
