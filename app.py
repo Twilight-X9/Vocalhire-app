@@ -62,7 +62,7 @@ payload = {
         "voiceId": MURF_VOICE_ID,       
         "text": text,                    
         "modelVersion": "GEN2" # <--- The exact parameter and value Murf wants!             
-        }
+    }
     
     try:
         response = requests.post(
