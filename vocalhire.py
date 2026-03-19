@@ -11,7 +11,7 @@ st.set_page_config(page_title="VocalHire AI", page_icon="🎙️")
 
 st.markdown("""
 <style>
-    .title-text { background: -webkit-linear-gradient(45deg, #FF4B2B, #FF416C); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3em; font-weight: 800; text-align: center; }
+    .title-text { background: -webkit-linear-gradient(45deg, #FF4B2B, #FF416C); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3em; font-weight: 800; text-align: center; margin-bottom: 0px; }
     .subtitle-text { text-align: center; color: #888888; font-size: 1.2em; margin-bottom: 2rem; }
 </style>
 """, unsafe_allow_html=True)
@@ -29,7 +29,7 @@ groq_client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai
 # ============================================================================
 # 3. STATE MANAGEMENT
 # ============================================================================
-SYSTEM_PROMPT = "You are a professional HR interviewer. Ask one brief interview question at a time. Keep responses under 25 words."
+SYSTEM_PROMPT = "You are a professional HR interviewer. Ask one brief interview question at a time. Keep responses under 2 sentences."
 
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -38,36 +38,27 @@ if "active" not in st.session_state:
 if "audio_to_play" not in st.session_state:
     st.session_state.audio_to_play = None
 if "input_key" not in st.session_state:
-    st.session_state.input_key = 0 # Used to reset the audio widget
+    st.session_state.input_key = 0 
 
 # ============================================================================
 # 4. CORE FUNCTIONS
 # ============================================================================
 
 def generate_murf_tts(text):
-    """Converts text to speech using Murf API"""
     url = "https://api.murf.ai/v1/speech/generate"
     headers = {"api-key": MURF_API_KEY, "Content-Type": "application/json"}
-    payload = {
-        "voiceId": MURF_VOICE_ID,
-        "text": text,
-        "modelVersion": "GEN2"
-    }
+    payload = {"voiceId": MURF_VOICE_ID, "text": text, "modelVersion": "GEN2"}
     try:
         resp = requests.post(url, json=payload, headers=headers)
         if resp.status_code == 200:
             audio_url = resp.json().get("audioFile")
-            # Download the actual audio file bytes
-            audio_data = requests.get(audio_url).content
-            return audio_data
+            return requests.get(audio_url).content
     except Exception as e:
-        st.error(f"TTS Error: {e}")
+        st.error(f"Murf TTS Error: {e}")
     return None
 
 def transcribe_audio(audio_file):
-    """Transcribes user speech using Groq Whisper"""
     try:
-        # Groq expects a file-like object with a name
         audio_file.name = "input.wav"
         transcription = groq_client.audio.transcriptions.create(
             model="whisper-large-v3",
@@ -75,81 +66,80 @@ def transcribe_audio(audio_file):
         )
         return transcription.text
     except Exception as e:
-        st.error(f"STT Error: {e}")
+        st.error(f"Groq STT Error: {e}")
         return None
 
-def get_ai_logic_response():
-    """Gets the next question/response from Llama 3"""
+def get_groq_response(messages):
     try:
         response = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=st.session_state.messages
+            messages=messages
         )
         return response.choices[0].message.content
     except Exception as e:
-        st.error(f"LLM Error: {e}")
-        return "Sorry, I encountered an error. Could you repeat that?"
+        st.error(f"Groq LLM Error: {e}")
+        return "I'm sorry, I'm having trouble thinking. Can you repeat that?"
 
 # ============================================================================
 # 5. UI LAYOUT
 # ============================================================================
 st.markdown('<p class="title-text">VocalHire</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle-text">Your AI Hiring Manager</p>', unsafe_allow_html=True)
 
-# Sidebar for controls
 with st.sidebar:
-    if st.button("Reset Interview"):
+    if st.button("Reset Interview", use_container_width=True):
         st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         st.session_state.active = False
         st.session_state.audio_to_play = None
         st.rerun()
 
-# Landing Page
 if not st.session_state.active:
-    if st.button("Start Interview", type="primary", use_container_width=True):
+    st.info("Welcome! Click below to start your mock interview.")
+    if st.button("🚀 Start Interview", type="primary", use_container_width=True):
         st.session_state.active = True
-        # Get first question immediately
-        first_resp = get_ai_logic_response()
-        st.session_state.messages.append({"role": "assistant", "content": first_resp})
-        st.session_state.audio_to_play = generate_murf_tts(first_resp)
+        # Initial AI greeting/question
+        ai_text = get_groq_response(st.session_state.messages)
+        st.session_state.messages.append({"role": "assistant", "content": ai_text})
+        st.session_state.audio_to_play = generate_murf_tts(ai_text)
         st.rerun()
 else:
-    # Display Chat
+    # Display message history
     for msg in st.session_state.messages:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.write(msg["content"])
 
-    # Play latest AI Voice response
+    # Play AI Voice (Autoplay enabled)
     if st.session_state.audio_to_play:
         st.audio(st.session_state.audio_to_play, format="audio/mp3", autoplay=True)
-        st.session_state.audio_to_play = None # Clear after playing once
+        st.session_state.audio_to_play = None 
 
     st.divider()
 
-    # User Input Area
+    # Conversational Input Logic
     st.write("### 🎙️ Your Turn")
-    # We use a key that changes every time to "clear" the widget
-    user_audio = st.audio_input("Record your answer", key=f"audio_in_{st.session_state.input_key}")
+    # Resetting the key forces the mic widget to clear after each response
+    user_audio = st.audio_input("Record your answer", key=f"mic_{st.session_state.input_key}")
 
     if user_audio:
-        with st.status("Thinking...", expanded=False) as status:
-            # 1. Transcribe
-            st.write("Listening to you...")
+        with st.status("Processing...", expanded=False) as status:
+            # 1. Transcribe Voice to Text
+            status.update(label="Transcribing your voice...")
             user_text = transcribe_audio(user_audio)
             
             if user_text:
                 st.session_state.messages.append({"role": "user", "content": user_text})
                 
-                # 2. Get AI Logic
-                st.write("Formulating question...")
+                # 2. Get Next Question from Groq
+                status.update(label="Thinking of next question...")
                 ai_text = get_groq_response(st.session_state.messages)
                 st.session_state.messages.append({"role": "assistant", "content": ai_text})
                 
-                # 3. Generate Speech
-                st.write("Synthesizing voice...")
+                # 3. Generate New Speech from Murf
+                status.update(label="Generating response voice...")
                 st.session_state.audio_to_play = generate_murf_tts(ai_text)
                 
-                # 4. Increment key to reset audio widget for next turn
+                # Increment key to clear the microphone for the next turn
                 st.session_state.input_key += 1
-                status.update(label="Response Ready!", state="complete")
+                status.update(label="Done!", state="complete")
                 st.rerun()
