@@ -58,10 +58,10 @@ def generate_murf_audio(text):
         "Content-Type": "application/json"
     }
     
-    payload = {
+payload = {
         "voiceId": MURF_VOICE_ID,       
         "text": text,                    
-        "model": "FALCON" # Using Falcon for that <130ms latency!             
+        "modelVersion": "GEN2" # <--- The exact parameter and value Murf wants!             
     }
     
     try:
