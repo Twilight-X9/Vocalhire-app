@@ -185,7 +185,7 @@ html, body, [class*= "css"], .stApp {
 load_dotenv()
 
 def get_secret(key_name, default_val = ""):
-if key_name in st.secrets:
+    if key_name in st.secrets:
     return st.secrets[key_name]
 return os.getenv(key_name, default_val)
 
