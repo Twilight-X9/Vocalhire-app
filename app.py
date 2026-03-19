@@ -35,28 +35,21 @@ SYSTEM_PROMPT = """You are a strict but fair HR manager at a top tech company.
 Conduct a mock interview with the user. Ask one question at a time. 
 Keep your questions under 2 sentences. Wait for their response."""
 
-# ============================================================================
-# 4. INITIALIZE SESSION STATE
-# ============================================================================
 if "messages" not in st.session_state:
     st.session_state.messages =[
         {"role": "system", "content": SYSTEM_PROMPT}
     ]
 
 # ============================================================================
-# 5. MURF FALCON TTS FUNCTION
+# 4. MURF FALCON TTS FUNCTION (THE MOUTH)
 # ============================================================================
 def generate_murf_audio(text):
-    """Generates audio from text using Murf AI's API."""
-    
     MURF_API_URL = "https://api.murf.ai/v1/speech/generate"
-    
     headers = {
         "api-key": MURF_API_KEY,
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
-    
     payload = {
         "voiceId": MURF_VOICE_ID,       
         "text": text,                    
@@ -64,44 +57,49 @@ def generate_murf_audio(text):
     }
     
     try:
-        response = requests.post(
-            MURF_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=30 
-        )
-        
+        response = requests.post(MURF_API_URL, headers=headers, json=payload, timeout=30)
         if response.status_code == 200:
-            # Murf API documentation typically returns a JSON with an audioFile URL
             data = response.json()
             if "audioFile" in data:
                 audio_url = data["audioFile"]
-                # Fetch the actual MP3 file from the URL
                 audio_response = requests.get(audio_url)
                 if audio_response.status_code == 200:
                     return audio_response.content
-            
-            # Fallback in case it returns raw bytes instead
             return response.content
         else:
             st.error(f"Murf API Error: {response.status_code} - {response.text}")
             return None
-            
     except Exception as e:
         st.error(f"Error connecting to Murf AI: {str(e)}")
         return None
 
 # ============================================================================
-# 6. GROQ CHAT FUNCTION
+# 5. GROQ WHISPER STT FUNCTION (THE EARS)
+# ============================================================================
+def transcribe_voice(audio_file):
+    """Converts the user's spoken audio into text using Groq Whisper."""
+    try:
+        client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
+        
+        # The API needs a filename to know it's an audio file
+        audio_file.name = "recording.wav"
+        
+        transcription = client.audio.transcriptions.create(
+            model="whisper-large-v3", # Groq's lightning-fast Whisper model
+            file=audio_file,
+            response_format="text"
+        )
+        return transcription
+    except Exception as e:
+        st.error(f"Groq Transcription Error: {str(e)}")
+        return None
+
+# ============================================================================
+# 6. GROQ CHAT FUNCTION (THE BRAIN)
 # ============================================================================
 def get_groq_response(messages):
-    """Gets a response from Groq's ultra-fast LLaMA model."""
     try:
-        client = OpenAI(
-            api_key=GROQ_API_KEY,
-            base_url="https://api.groq.com/openai/v1"
-        )
-        
+        client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=messages,
@@ -117,7 +115,7 @@ def get_groq_response(messages):
 # 7. USER INTERFACE
 # ============================================================================
 st.title("🎙️ VocalHire: AI Mock Interviewer")
-st.subheader("Powered by Groq & Murf AI")
+st.subheader("Speak directly to the AI Hiring Manager!")
 st.divider()
 
 for message in st.session_state.messages:
@@ -132,31 +130,42 @@ for message in st.session_state.messages:
 if len(st.session_state.messages) == 1: 
     if st.button("🚀 Start Interview", type="primary"):
         with st.spinner("Interviewer is joining the room..."):
-            
             ai_response = get_groq_response(st.session_state.messages)
-            
             if ai_response:
                 st.session_state.messages.append({"role": "assistant", "content": ai_response})
-                
                 with st.chat_message("assistant"):
                     st.write(ai_response)
-                
                 with st.spinner("🎧 Connecting to Murf Voice..."):
                     audio_bytes = generate_murf_audio(ai_response)
                     if audio_bytes:
                         st.audio(audio_bytes, format="audio/mp3", autoplay=True)
 
 # ============================================================================
-# 9. CHAT INPUT FOR USER RESPONSES
+# 9. INPUT AREA (VOICE AND TEXT)
 # ============================================================================
-user_input = st.chat_input("Type your answer here...")
+st.write("---")
+st.write("**Your Turn to Answer:**")
 
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
+# We capture either audio input OR text input
+user_audio = st.audio_input("Click the microphone to record your answer")
+user_text = st.chat_input("Or type your answer here as a backup...")
+
+# Figure out which input the user used
+final_user_input = None
+
+if user_audio:
+    with st.spinner("Transcribing your voice..."):
+        final_user_input = transcribe_voice(user_audio)
+elif user_text:
+    final_user_input = user_text
+
+# If we got input from either the mic or the text box, process it!
+if final_user_input:
+    st.session_state.messages.append({"role": "user", "content": final_user_input})
     with st.chat_message("user"):
-        st.write(user_input)
+        st.write(final_user_input)
     
-    with st.spinner("🤔 Thinking..."):
+    with st.spinner("🤔 Interviewer is thinking..."):
         ai_response = get_groq_response(st.session_state.messages)
     
     if ai_response:
@@ -177,7 +186,7 @@ if user_input:
 # ============================================================================
 with st.sidebar:
     st.header("ℹ️ About")
-    st.info("VocalHire is an AI-powered mock interview application.")
+    st.info("VocalHire uses Groq Whisper for Voice-to-Text, Groq LLaMA for AI Logic, and Murf for Text-to-Voice.")
     
     st.header("🔑 API Status")
     if GROQ_API_KEY:
