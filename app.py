@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 # ============================================================================
-# 2. SMART API KEY LOADER (Checks Streamlit Secrets first, then local .env)
+# 2. SMART API KEY LOADER
 # ============================================================================
 load_dotenv()
 
@@ -24,7 +24,6 @@ def get_secret(key_name, default_val=""):
         return st.secrets[key_name]
     return os.getenv(key_name, default_val)
 
-# WE SWAPPED OPENAI FOR GROQ HERE!
 GROQ_API_KEY = get_secret("GROQ_API_KEY") 
 MURF_API_KEY = get_secret("MURF_API_KEY")
 MURF_VOICE_ID = get_secret("MURF_VOICE_ID", "en-US-marcus")
@@ -45,23 +44,23 @@ if "messages" not in st.session_state:
     ]
 
 # ============================================================================
-# 5. MURF FALCON TTS FUNCTION (Ultra-Low Latency)
+# 5. MURF FALCON TTS FUNCTION
 # ============================================================================
 def generate_murf_audio(text):
-    """Generates audio from text using Murf AI's Falcon TTS model."""
+    """Generates audio from text using Murf AI's API."""
     
-    # Standard Murf Generation Endpoint
     MURF_API_URL = "https://api.murf.ai/v1/speech/generate"
     
     headers = {
         "api-key": MURF_API_KEY,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Accept": "application/json"
     }
     
-payload = {
+    payload = {
         "voiceId": MURF_VOICE_ID,       
         "text": text,                    
-        "modelVersion": "GEN2" # <--- The exact parameter and value Murf wants!             
+        "modelVersion": "GEN2"            
     }
     
     try:
@@ -73,6 +72,16 @@ payload = {
         )
         
         if response.status_code == 200:
+            # Murf API documentation typically returns a JSON with an audioFile URL
+            data = response.json()
+            if "audioFile" in data:
+                audio_url = data["audioFile"]
+                # Fetch the actual MP3 file from the URL
+                audio_response = requests.get(audio_url)
+                if audio_response.status_code == 200:
+                    return audio_response.content
+            
+            # Fallback in case it returns raw bytes instead
             return response.content
         else:
             st.error(f"Murf API Error: {response.status_code} - {response.text}")
@@ -83,19 +92,18 @@ payload = {
         return None
 
 # ============================================================================
-# 6. GROQ CHAT FUNCTION (The New Brain!)
+# 6. GROQ CHAT FUNCTION
 # ============================================================================
 def get_groq_response(messages):
-    """Gets a response from Groq's ultra-fast LLaMA 3 model."""
+    """Gets a response from Groq's ultra-fast LLaMA model."""
     try:
-        # We use the OpenAI library, but point it to Groq's servers!
         client = OpenAI(
             api_key=GROQ_API_KEY,
             base_url="https://api.groq.com/openai/v1"
         )
         
         response = client.chat.completions.create(
-            model="openai/gpt-oss-120b", # Free and blazingly fast Groq model
+            model="openai/gpt-oss-120b",
             messages=messages,
             max_tokens=150,  
             temperature=0.7  
@@ -106,10 +114,10 @@ def get_groq_response(messages):
         return None
 
 # ============================================================================
-# 7. USER INTERFACE - HEADER & CHAT HISTORY
+# 7. USER INTERFACE
 # ============================================================================
 st.title("🎙️ VocalHire: AI Mock Interviewer")
-st.subheader("Powered by Groq & Murf Falcon TTS")
+st.subheader("Powered by Groq & Murf AI")
 st.divider()
 
 for message in st.session_state.messages:
@@ -125,7 +133,6 @@ if len(st.session_state.messages) == 1:
     if st.button("🚀 Start Interview", type="primary"):
         with st.spinner("Interviewer is joining the room..."):
             
-            # Using Groq instead of OpenAI
             ai_response = get_groq_response(st.session_state.messages)
             
             if ai_response:
@@ -134,9 +141,10 @@ if len(st.session_state.messages) == 1:
                 with st.chat_message("assistant"):
                     st.write(ai_response)
                 
-                audio_bytes = generate_murf_audio(ai_response)
-                if audio_bytes:
-                    st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+                with st.spinner("🎧 Connecting to Murf Voice..."):
+                    audio_bytes = generate_murf_audio(ai_response)
+                    if audio_bytes:
+                        st.audio(audio_bytes, format="audio/mp3", autoplay=True)
 
 # ============================================================================
 # 9. CHAT INPUT FOR USER RESPONSES
@@ -149,7 +157,6 @@ if user_input:
         st.write(user_input)
     
     with st.spinner("🤔 Thinking..."):
-        # Using Groq instead of OpenAI
         ai_response = get_groq_response(st.session_state.messages)
     
     if ai_response:
@@ -166,11 +173,11 @@ if user_input:
             st.warning("Audio generation failed. Showing text only.")
 
 # ============================================================================
-# 10. SIDEBAR - INFORMATION & CONTROLS
+# 10. SIDEBAR
 # ============================================================================
 with st.sidebar:
     st.header("ℹ️ About")
-    st.info("VocalHire is an AI-powered mock interview application using Groq LLaMA 3 and Murf Falcon TTS.")
+    st.info("VocalHire is an AI-powered mock interview application.")
     
     st.header("🔑 API Status")
     if GROQ_API_KEY:
